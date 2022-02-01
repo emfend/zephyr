@@ -18,7 +18,13 @@ config IPM_IMX
 	bool "IMX IPM driver"
 	depends on HAS_IMX_HAL
 	help
-	  Driver for NXP i.MX messaging unit
+	  Driver for NXP i.MX messaging unit without MCUX support
+
+config IPM_IMX_REV2
+	bool "IMX IPM REV2 driver"
+	depends on HAS_MCUX
+	help
+	  Driver for NXP i.MX messaging unit with MCUX support
 
 choice
 	prompt "IMX IPM max data size"
