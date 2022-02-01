@@ -1,0 +1,23 @@
+/*
+ * Copyright (c) 2022, matthias.fend@emfend.at
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/ {
+	chosen {
+		zephyr,ipc_shm = &ipc_shm;
+		zephyr,ipc = &mailbox0;
+	};
+
+        reserved-memory {
+                #address-cells = <1>;
+                #size-cells = <1>;
+                ranges;
+
+                ipc_shm: memory@55000000  {
+                        reg = <0x55000000 0x500000>;
+                };
+        };
+
+};
