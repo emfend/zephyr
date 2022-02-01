@@ -87,6 +87,13 @@
 			#clock-cells = <3>;
 		};
 
+		mailbox0:mailbox@30ab0000 {
+			compatible = "nxp,imx-mailbox";
+			reg = <0x30ab0000 DT_SIZE_K(64)>;
+			interrupts = <97 0>;
+			label = "MAILBOX_0";
+		};
+
 		/*
 		 * For now only UART4 is supported and
 		 * tested with the serial driver
