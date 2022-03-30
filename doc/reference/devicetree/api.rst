@@ -421,6 +421,10 @@ device.
      - Used by the OpenThread to specify UART device for Spinel protocol
    * - zephyr,pcie-controller
      - The node corresponding to the PCIe Controller
+   * - zephyr,rsc_table
+     - A node used by the OpenAMP subsystem to support resource table
+       relocation. The resource table is copied to the address specified by
+       ``reg``.
    * - zephyr,settings-partition
      - Fixed partition node. If defined this selects the partition used
        by the NVS and FCB settings backends.

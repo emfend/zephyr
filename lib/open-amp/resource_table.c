@@ -72,8 +72,25 @@ static struct fw_resource_table __resource resource_table = {
 #endif
 };
 
+#if DT_HAS_CHOSEN(zephyr_rsc_table)
+
+#define RSC_TABLE_NODE		DT_CHOSEN(zephyr_rsc_table)
+#define RSC_TABLE_NODE_START	DT_REG_ADDR(RSC_TABLE_NODE)
+#define RSC_TABLE_NODE_SIZE	DT_REG_SIZE(RSC_TABLE_NODE)
+
+BUILD_ASSERT(sizeof(resource_table) <= RSC_TABLE_NODE_SIZE,
+	     "Resource table does not fit in the relocation area");
+
+#endif
+
 void rsc_table_get(void **table_ptr, int *length)
 {
+#if defined(RSC_TABLE_NODE)
+	*table_ptr = (void *)RSC_TABLE_NODE_START;
+	*length = sizeof(resource_table);
+	memcpy(*table_ptr, (void *)&resource_table, *length);
+#else
 	*table_ptr = (void *)&resource_table;
 	*length = sizeof(resource_table);
+#endif
 }
