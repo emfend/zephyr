@@ -25,3 +25,11 @@
 		};
 	};
 };
+
+&uart2 {
+	status = "disabled";
+};
+
+&uart4 {
+	status = "disabled";
+};
