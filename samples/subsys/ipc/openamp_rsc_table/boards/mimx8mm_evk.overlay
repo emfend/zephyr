@@ -23,6 +23,12 @@
 		rsc_table: rsc-table@b80ff000 {
 			reg = <0xb80ff000 0x1000>;
 		};
+
+		ram_console_buffer: ram_console_buffer@b8100000 {
+			compatible = "zephyr,memory-region", "mmio-sram";
+			reg = <0xb8100000 0x1000>;
+			zephyr,memory-region = "ram_console_buffer";
+		};
 	};
 };
 
