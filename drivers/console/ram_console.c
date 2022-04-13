@@ -16,7 +16,7 @@ extern void __printk_hook_install(int (*fn)(int));
 extern void __stdout_hook_install(int (*fn)(int));
 
 /* Extra byte to ensure we're always NULL-terminated */
-char ram_console[CONFIG_RAM_CONSOLE_BUFFER_SIZE + 1];
+char Z_GENERIC_SECTION(ram_console_buffer) ram_console[CONFIG_RAM_CONSOLE_BUFFER_SIZE + 1];
 static int pos;
 
 static int ram_console_out(int character)
