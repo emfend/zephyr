@@ -16,6 +16,7 @@
 #include <openamp/open_amp.h>
 #include <metal/device.h>
 #include <resource_table.h>
+#include <sys/ring_buffer.h>
 
 #include <logging/log.h>
 LOG_MODULE_REGISTER(openamp_rsc_table, LOG_LEVEL_DBG);
@@ -39,10 +40,12 @@ LOG_MODULE_REGISTER(openamp_rsc_table, LOG_LEVEL_DBG);
 K_THREAD_STACK_DEFINE(thread_mng_stack, APP_TASK_STACK_SIZE);
 K_THREAD_STACK_DEFINE(thread_rp__client_stack, APP_TASK_STACK_SIZE);
 K_THREAD_STACK_DEFINE(thread_tty_stack, APP_TTY_TASK_STACK_SIZE);
+K_THREAD_STACK_DEFINE(thread_console_stack, APP_TASK_STACK_SIZE);
 
 static struct k_thread thread_mng_data;
 static struct k_thread thread_rp__client_data;
 static struct k_thread thread_tty_data;
+static struct k_thread thread_console_data;
 
 static const struct device *ipm_handle;
 
@@ -81,9 +84,13 @@ static struct rpmsg_rcv_msg sc_msg = {.data = rx_sc_msg};
 static struct rpmsg_endpoint tty_ept;
 static struct rpmsg_rcv_msg tty_msg;
 
+static struct rpmsg_endpoint console_ept;
+
 static K_SEM_DEFINE(data_sem, 0, 1);
 static K_SEM_DEFINE(data_sc_sem, 0, 1);
 static K_SEM_DEFINE(data_tty_sem, 0, 1);
+static K_SEM_DEFINE(data_console_sem, 0, 1);
+static K_SEM_DEFINE(data_console_ready_sem, 0, 1);
 
 static void platform_ipm_callback(const struct device *dev, void *context,
 				  uint32_t id, volatile void *data)
@@ -115,6 +122,14 @@ static int rpmsg_recv_tty_callback(struct rpmsg_endpoint *ept, void *data,
 	return RPMSG_SUCCESS;
 }
 
+static int rpmsg_recv_console_callback(struct rpmsg_endpoint *ept, void *data,
+				       size_t len, uint32_t src, void *priv)
+{
+	k_sem_give(&data_console_sem);
+
+	return RPMSG_SUCCESS;
+}
+
 static void receive_message(unsigned char **msg, unsigned int *len)
 {
 	int status = k_sem_take(&data_sem, K_FOREVER);
@@ -135,7 +150,6 @@ int mailbox_notify(void *priv, uint32_t id)
 {
 	ARG_UNUSED(priv);
 
-	LOG_DBG("%s: msg received\n", __func__);
 	ipm_send(ipm_handle, 0, CONFIG_OPENAMP_IPC_NOTIFY_CHAN, NULL, 0);
 
 	return 0;
@@ -330,6 +344,70 @@ void app_rpmsg_tty(void *arg1, void *arg2, void *arg3)
 	printk("OpenAMP Linux TTY responder ended\n");
 }
 
+/* rpmsg tty console */
+
+#define RPMSGTTY_RB_SIZE (128)
+RING_BUF_DECLARE(rpmsgtty_rb, RPMSGTTY_RB_SIZE);
+
+extern void __printk_hook_install(int (*fn)(int));
+extern void __stdout_hook_install(int (*fn)(int));
+
+static int rpmsgtty_console_out(int character)
+{
+	char c = (char)character;
+
+	ring_buf_put(&rpmsgtty_rb, &c, 1);
+
+	return character;
+}
+
+static void rpmsgtty_console_init()
+{
+	ring_buf_init(&rpmsgtty_rb, RPMSGTTY_RB_SIZE, rpmsgtty_rb.buffer);
+
+	__printk_hook_install(rpmsgtty_console_out);
+	__stdout_hook_install(rpmsgtty_console_out);
+}
+
+void app_rpmsg_console(void *arg1, void *arg2, void *arg3)
+{
+	ARG_UNUSED(arg1);
+	ARG_UNUSED(arg2);
+	ARG_UNUSED(arg3);
+
+	k_sem_take(&data_console_sem,  K_FOREVER);
+
+	rpmsg_create_ept(&console_ept, rpdev, "rpmsg-tty",
+			 RPMSG_ADDR_ANY, RPMSG_ADDR_ANY,
+			 rpmsg_recv_console_callback, NULL);
+
+	rpmsgtty_console_init();
+
+	k_sem_give(&data_console_ready_sem);
+
+	while (console_ept.addr !=  RPMSG_ADDR_ANY) {
+		int rc;
+		uint8_t *rb_data;
+		uint32_t rb_len;
+
+		rc = k_sem_take(&data_console_sem, K_MSEC(100));
+		rb_len = ring_buf_get_claim(&rpmsgtty_rb, &rb_data, RPMSGTTY_RB_SIZE);
+		if (rb_len) {
+			/*
+			 * Note that sending is only possible after a message has been received
+			 * from the remote host on this endpoint. Because the destination
+			 * address required for sending is extracted from the first message
+			 * received.
+			 * Unfortunately, since this is intentional, there's not much we can
+			 * do about it.
+			 */
+			rpmsg_send(&console_ept, rb_data, rb_len);
+			ring_buf_get_finish(&rpmsgtty_rb, rb_len);
+		}
+	}
+	rpmsg_destroy_ept(&console_ept);
+}
+
 void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 {
 	ARG_UNUSED(arg1);
@@ -357,6 +435,10 @@ void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 		goto task_end;
 	}
 
+	/* start console client */
+	k_sem_give(&data_console_sem);
+	/* wait until console endpoint is set up */
+	k_sem_take(&data_console_ready_sem, K_FOREVER);
 	/* start the rpmsg clients */
 	k_sem_give(&data_sc_sem);
 	k_sem_give(&data_tty_sem);
@@ -382,5 +464,8 @@ void main(void)
 			NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
 	k_thread_create(&thread_tty_data, thread_tty_stack, APP_TTY_TASK_STACK_SIZE,
 			(k_thread_entry_t)app_rpmsg_tty,
+			NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
+	k_thread_create(&thread_console_data, thread_console_stack, APP_TASK_STACK_SIZE,
+			(k_thread_entry_t)app_rpmsg_console,
 			NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
 }
